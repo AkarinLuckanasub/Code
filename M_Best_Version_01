@@ -1,0 +1,188 @@
+// ----------------- INITIALIZATION -----------------
+ClearCollect(
+    colLine,
+    MASTER_LINE
+);
+Set(_dateSelected, Today());
+Set(varTaskTitle, Param("task_title"));
+
+// Calendar calculations
+Set(_firstDayOfDaySelected, Today());
+Set(_firstDayOfMonth, DateAdd(Today(), 1 - Day(Today()), TimeUnit.Days));
+Set(
+    _firstDayInView,
+    DateAdd(_firstDayOfMonth, -(Weekday(_firstDayOfMonth) - 2 + 1), TimeUnit.Days)
+);
+Set(
+    _lastDayOfMonth,
+    DateAdd(DateAdd(_firstDayOfMonth, 1, TimeUnit.Months), -1, TimeUnit.Days)
+);
+Set(
+    _lastDayOfMonth,
+    DateAdd(_lastDayOfMonth, 86399, TimeUnit.Seconds) // +23h59m59s
+);
+
+Set(_minDate, _firstDayInView);
+Set(_maxDate, DateAdd(_firstDayInView, 40, TimeUnit.Days));
+
+// Week start/end
+Set(
+    _firstDayOfWeek,
+    DateAdd(Today(), 1 - Weekday(Today(), StartOfWeek.Sunday), TimeUnit.Days)
+);
+Set(_lastDayOfWeek, DateAdd(_firstDayOfWeek, 6, TimeUnit.Days));
+Set(_minDateWeek, _firstDayOfWeek);
+Set(_maxDateWeek, _lastDayOfWeek);
+
+// Current user
+Set(
+    varUser,
+    First(Filter(MASTER_EMPLOYEE, emp_email = User().Email))
+);
+
+// Default calendar mode
+Set(Month, true);
+Set(Weekday, false);
+Set(Day, false);
+Set(lastSubmittedID, 0);
+
+Notify("กำลังรอโหลดข้อมูล....", NotificationType.Information);
+
+// ----------------- BUILD PERMISSIONS -----------------
+ClearCollect(
+    colPermission_0,
+    ForAll(
+        MASTER_LINE,
+        Table(
+            { mail: ThisRecord.rep_sv.Email, PD: pd, Line: line_key, Role: "SV" },
+            { mail: ThisRecord.rep_am.Email, PD: pd, Line: line_key, Role: "AM" },
+            { mail: ThisRecord.rep_mgr.Email, PD: pd, Line: line_key, Role: "MGR" },
+            { mail: ThisRecord.rep_gm.Email, PD: pd, Line: line_key, Role: "GM" }
+        )
+    )
+);
+Collect(
+    colPermission_0,
+    ForAll(
+        MASTER_LINE,
+        ForAll(
+            ThisRecord.rep_ta,
+            { mail: Email, PD: pd, Line: line_key, Role: "TA" }
+        )
+    )
+);
+Collect(
+    colPermission_0,
+    ForAll(
+        MASTER_LINE,
+        ForAll(
+            ThisRecord.rep_tl,
+            { mail: Email, PD: pd, Line: line_key, Role: "TL" }
+        )
+    )
+);
+
+// Build distinct PDs where current user has permission
+ClearCollect(
+    clPMS_All,
+    Distinct(Filter(colPermission_0, mail = User().Email), PD)
+);
+
+// ----------------- SET DEFAULT FILTERS -----------------
+If(
+    IsBlank(varFilterPD),
+    Set(varFilterPD, First(clPMS_All).Result),
+    varFilterPD
+);
+
+If(
+    IsBlank(varSectionCode),
+    Set(
+        varSectionCode,
+        LookUp(
+            colLine,
+            line_key = First(Filter(colPermission_0, mail = User().Email)).Line
+        ).section_code
+    )
+);
+
+// ----------------- IMPROVEMENT RECORDS -----------------
+ClearCollect(
+    col5m1e,
+    Sort(
+        Filter(
+            '5M1E_Improvement',
+            time_start >= _firstDayOfMonth &&
+            time_start <= _lastDayOfMonth &&
+            pd = varFilterPD &&
+            section_code = varSectionCode
+        ),
+        time_start,
+        SortOrder.Descending
+    )
+);
+
+// ----------------- EMPLOYEES -----------------
+// Load all employees ONCE
+ClearCollect(colAllEmployees, MASTER_EMPLOYEE);
+
+// Split into department collections
+ClearCollect(
+    colEmp,
+    Filter(colAllEmployees, position_tier in ["T1","T2","T3","T4","T5","T6","T7","T8"])
+);
+
+ClearCollect(colEmpQA, Filter(colAllEmployees, Short_Dep = "QA"));
+ClearCollect(colEmpPE, Filter(colAllEmployees, Short_Dep = "PE"));
+ClearCollect(colEmpPD, Filter(colAllEmployees, Short_Dep = "PD"));
+ClearCollect(colEmpPC, Filter(colAllEmployees, Short_Dep = "PC"));
+ClearCollect(colEmpMT, Filter(colAllEmployees, Short_Dep = "MT"));
+ClearCollect(colEmpQC, Filter(colAllEmployees, Short_Dep = "QC"));
+
+// ----------------- DROPDOWNS -----------------
+ClearCollect(
+    DropdownlinenameItems,
+    { line_name: "All", pd: varFilterPD, section_code: varSectionCode }
+);
+Collect(
+    DropdownlinenameItems,
+    Filter(MASTER_LINE, pd = varFilterPD && section_code = varSectionCode)
+);
+
+// ----------------- IMPROVEMENT CONTENT -----------------
+ClearCollect(colContent, '5M1E_Improvement_Content');
+
+// ----------------- CATEGORY & APPROVAL -----------------
+ClearCollect(
+    colCodeRecordChoices,
+    { DisplayValue: "All", DataValue: "All" },
+    { DisplayValue: "M1 : Man", DataValue: "M1" },
+    { DisplayValue: "M2 : Machine", DataValue: "M2" },
+    { DisplayValue: "M3 : Material", DataValue: "M3" },
+    { DisplayValue: "M4 : Method", DataValue: "M4" },
+    { DisplayValue: "M5 : Measurement", DataValue: "M5" },
+    { DisplayValue: "E : Environment", DataValue: "E" }
+);
+
+// Approval screen filter defaults
+Set(varFilterPD_Approve, "");
+Set(varFilterSectionCode_Approve, "");
+Set(varFilterStartDate_Approve, _firstDayOfMonth);
+Set(varFilterEndDate_Approve, Today());
+Set(varFilterStatus_Approve, "All");
+Set(varFilterCategory_Approve, "All");
+Set(varShowFilters_Approve, false);
+
+ClearCollect(
+    CategoryOptions,
+    { Display: "All", Value: "All" },
+    { Display: "M1 : Man", Value: "M1" },
+    { Display: "M2 : Machine", Value: "M2" },
+    { Display: "M3 : Method", Value: "M3" },
+    { Display: "M4 : Material", Value: "M4" },
+    { Display: "M5 : Measurement", Value: "M5" },
+    { Display: "E : Environment", Value: "E" }
+);
+
+// ----------------- FINISH -----------------
+Notify("โหลดข้อมูลเสร็จสิ้น", NotificationType.Success);
